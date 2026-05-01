@@ -5,6 +5,8 @@ Reads tenant list from credentials.py. Each tenant is a separate Casavi instance
 with its own session; login is performed once per tenant.
 
 Downloads are saved to: <download_dir>/<tenant_name>/<filename>.pdf
+Already-downloaded doc IDs are tracked in downloaded.yaml so files can be moved
+(e.g. to Paperless) without being re-downloaded.
 """
 
 import os
@@ -12,8 +14,12 @@ import re
 import sys
 from urllib.parse import urlparse
 
+import yaml
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import credentials
+
+def state_file(download_dir: str) -> str:
+    return os.path.join(download_dir, "downloaded.yaml")
 
 
 def extract_community_id(url: str) -> str:
@@ -27,37 +33,70 @@ def get_tenants():
     """Return list of (name, documents_url) tuples from credentials."""
     if hasattr(credentials, 'tenants'):
         return [(t['name'], t['url']) for t in credentials.tenants]
-    # Backward-compatible: single documents_url
     url = credentials.documents_url
     name = urlparse(url).netloc.split('.')[0]
     return [(name, url)]
 
 
-def download_tenant(page, context, name: str, documents_url: str, download_dir: str):
+def load_state(download_dir: str) -> dict:
+    """Load downloaded doc IDs from YAML. Returns {tenant: set(doc_ids)}."""
+    path = state_file(download_dir)
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    return {tenant: set(ids) for tenant, ids in data.items()}
+
+
+def save_state(state: dict, download_dir: str):
+    """Persist state to YAML. Converts sets to sorted lists for readability."""
+    with open(state_file(download_dir), "w") as f:
+        yaml.dump({tenant: sorted(ids) for tenant, ids in state.items()},
+                  f, default_flow_style=False, allow_unicode=True)
+
+
+def download_tenant(page, context, name: str, documents_url: str,
+                    download_dir: str, state: dict):
     origin = f"{urlparse(documents_url).scheme}://{urlparse(documents_url).netloc}"
-    login_url = f"{origin}/app/login"
     community_id = extract_community_id(documents_url)
     folder_selector = "div.clickable.box-subhead--title.dashboard-tile-company-background"
     pdf_selector = f'a[href*="/api/v1/communities/{community_id}/documents/"]'
-    tenant_dir = os.path.join(download_dir, name)
+    tenant_dir = os.path.join(download_dir, "files", name)
     os.makedirs(tenant_dir, exist_ok=True)
+    downloaded = state.setdefault(name, set())
 
-    print(f"\n[{name}] Logging in at {login_url}")
-    page.goto(login_url, timeout=20000)
-    page.wait_for_selector('input[name="username"]', timeout=10000)
-    page.fill('input[name="username"]', credentials.username)
-    page.fill('input[name="password"]', credentials.password)
-    page.click('button[data-testid="login-in"]')
-
+    # Navigate to documents first so the SSO redirect carries ?next= back correctly
+    print(f"\n[{name}] Navigating to documents: {documents_url}")
     try:
-        page.wait_for_url(lambda url: "login" not in url, timeout=15000)
+        page.goto(documents_url, timeout=20000, wait_until="domcontentloaded")
+    except Exception:
+        pass
+
+    # Wait for either the login form or the folder elements
+    login_input = page.locator('input[name="username"]')
+    folder_el = page.locator(folder_selector)
+    try:
+        page.locator(f'input[name="username"], {folder_selector}').first.wait_for(timeout=15000)
     except PlaywrightTimeoutError:
-        print(f"[{name}] ERROR: Login failed — check credentials.", file=sys.stderr)
+        print(f"[{name}] ERROR: Neither login form nor documents loaded.", file=sys.stderr)
         return
 
-    print(f"[{name}] Login successful. Navigating to documents...")
-    page.goto(documents_url, timeout=20000, wait_until="domcontentloaded")
-    page.wait_for_load_state("networkidle", timeout=10000)
+    if login_input.is_visible():
+        print(f"[{name}] Login form detected, authenticating...")
+        page.fill('input[name="username"]', credentials.username)
+        page.fill('input[name="password"]', credentials.password)
+        page.click('button[data-testid="login-in"]')
+        try:
+            page.wait_for_selector(folder_selector, timeout=15000)
+        except PlaywrightTimeoutError:
+            pass
+
+    # Some portals redirect to home after login rather than back to documents
+    if not folder_el.first.is_visible():
+        try:
+            page.goto(documents_url, timeout=20000, wait_until="domcontentloaded")
+        except Exception:
+            pass
 
     try:
         page.wait_for_selector(folder_selector, timeout=15000)
@@ -87,15 +126,24 @@ def download_tenant(page, context, name: str, documents_url: str, download_dir: 
     for pdf_url, text in unique_links:
         if pdf_url.startswith("/"):
             pdf_url = origin + pdf_url
-        filename = text.replace(" ", "_") if text else pdf_url.split("/")[-1]
-        if not filename.endswith(".pdf"):
-            filename += ".pdf"
+        doc_id = urlparse(pdf_url).path.rstrip("/").split("/")[-1]
+
+        if doc_id in downloaded:
+            print(f"  [{name}] Skipped (already downloaded): {doc_id}")
+            continue
+
+        base = text.replace(" ", "_") if text else doc_id
+        if not base.endswith(".pdf"):
+            base += ".pdf"
+        filename = f"{doc_id}_{base}"
         dest = os.path.join(tenant_dir, filename)
 
         response = context.request.get(pdf_url)
         if response.status == 200:
             with open(dest, "wb") as f:
                 f.write(response.body())
+            downloaded.add(doc_id)
+            save_state(state, download_dir)
             print(f"  [{name}] Downloaded: {filename}")
         else:
             print(f"  [{name}] FAILED ({response.status}): {pdf_url}", file=sys.stderr)
@@ -104,8 +152,15 @@ def download_tenant(page, context, name: str, documents_url: str, download_dir: 
 def main():
     tenants = get_tenants()
     download_dir = credentials.download_dir
+    os.makedirs(download_dir, exist_ok=True)
+    state = load_state(download_dir)
 
     print(f"Tenants: {[name for name, _ in tenants]}")
+
+    record_video = "--video" in sys.argv
+    video_dir = "./debug-videos"
+    if record_video:
+        os.makedirs(video_dir, exist_ok=True)
 
     with sync_playwright() as p:
         for name, documents_url in tenants:
@@ -113,11 +168,18 @@ def main():
                 headless=True,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
-            context = browser.new_context(ignore_https_errors=True)
+            ctx_args = dict(ignore_https_errors=True)
+            if record_video:
+                ctx_args["record_video_dir"] = os.path.join(video_dir, name)
+                ctx_args["record_video_size"] = {"width": 1280, "height": 720}
+            context = browser.new_context(**ctx_args)
             page = context.new_page()
             try:
-                download_tenant(page, context, name, documents_url, download_dir)
+                download_tenant(page, context, name, documents_url, download_dir, state)
             finally:
+                context.close()
+                if record_video and page.video:
+                    print(f"[{name}] Video saved: {page.video.path()}")
                 browser.close()
 
     print("\nAll tenants done.")

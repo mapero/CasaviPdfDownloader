@@ -10,6 +10,6 @@ python_executable = os.path.join('myenv', 'bin', 'python')
 playwright_executable = os.path.join('myenv', 'bin', 'playwright')
 
 subprocess.run([sys.executable, '-m', 'venv', 'myenv'])
-subprocess.run([pip_executable, 'install', 'playwright'])
+subprocess.run([pip_executable, 'install', 'playwright', 'pyyaml'])
 subprocess.run([playwright_executable, 'install', 'chromium'])
 subprocess.run([python_executable, './download.py'])
