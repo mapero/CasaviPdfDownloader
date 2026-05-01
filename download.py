@@ -1,10 +1,10 @@
 """
 Casavi PDF Downloader — Playwright-based, multi-tenant.
 
-Reads tenant list from credentials.py. Each tenant is a separate Casavi instance
-with its own session; login is performed once per tenant.
+Configuration is loaded by config.py (12-factor style):
+  config.yaml  >  env vars  >  CLI args
 
-Downloads are saved to: <download_dir>/<tenant_name>/<filename>.pdf
+Downloads are saved to: <download_dir>/files/<tenant_name>/<doc_id>_<filename>.pdf
 Already-downloaded doc IDs are tracked in downloaded.yaml so files can be moved
 (e.g. to Paperless) without being re-downloaded.
 """
@@ -16,7 +16,9 @@ from urllib.parse import urlparse
 
 import yaml
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-import credentials
+
+from config import load_config
+
 
 def state_file(download_dir: str) -> str:
     return os.path.join(download_dir, "downloaded.yaml")
@@ -27,15 +29,6 @@ def extract_community_id(url: str) -> str:
     if not match:
         raise ValueError(f"Cannot extract community ID from URL: {url}")
     return match.group(1)
-
-
-def get_tenants():
-    """Return list of (name, documents_url) tuples from credentials."""
-    if hasattr(credentials, 'tenants'):
-        return [(t['name'], t['url']) for t in credentials.tenants]
-    url = credentials.documents_url
-    name = urlparse(url).netloc.split('.')[0]
-    return [(name, url)]
 
 
 def load_state(download_dir: str) -> dict:
@@ -56,6 +49,7 @@ def save_state(state: dict, download_dir: str):
 
 
 def download_tenant(page, context, name: str, documents_url: str,
+                    username: str, password: str,
                     download_dir: str, state: dict):
     origin = f"{urlparse(documents_url).scheme}://{urlparse(documents_url).netloc}"
     community_id = extract_community_id(documents_url)
@@ -83,8 +77,8 @@ def download_tenant(page, context, name: str, documents_url: str,
 
     if login_input.is_visible():
         print(f"[{name}] Login form detected, authenticating...")
-        page.fill('input[name="username"]', credentials.username)
-        page.fill('input[name="password"]', credentials.password)
+        page.fill('input[name="username"]', username)
+        page.fill('input[name="password"]', password)
         page.click('button[data-testid="login-in"]')
         try:
             page.wait_for_selector(folder_selector, timeout=15000)
@@ -150,14 +144,19 @@ def download_tenant(page, context, name: str, documents_url: str,
 
 
 def main():
-    tenants = get_tenants()
-    download_dir = credentials.download_dir
+    cfg = load_config()
+
+    tenants = [(t['name'], t['url']) for t in cfg['tenants']]
+    download_dir = cfg['download_dir']
+    username = cfg['username']
+    password = cfg['password']
+    record_video = cfg['video']
+
     os.makedirs(download_dir, exist_ok=True)
     state = load_state(download_dir)
 
     print(f"Tenants: {[name for name, _ in tenants]}")
 
-    record_video = "--video" in sys.argv
     video_dir = "./debug-videos"
     if record_video:
         os.makedirs(video_dir, exist_ok=True)
@@ -175,7 +174,8 @@ def main():
             context = browser.new_context(**ctx_args)
             page = context.new_page()
             try:
-                download_tenant(page, context, name, documents_url, download_dir, state)
+                download_tenant(page, context, name, documents_url,
+                                username, password, download_dir, state)
             finally:
                 context.close()
                 if record_video and page.video:

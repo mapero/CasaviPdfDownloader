@@ -1,31 +1,118 @@
 # CasaviPdfDownloader
 
-Download your pdfs from casavi
+Download all your PDFs from Casavi automatically.
 
 ## Intro
 
-Backing up the documents from Casavi can be frustrating and error prone, as this portal doesn't provide a way to download all the files in an automated fashion. This script is doing the job by emulating a human who clicks on every link one after another and fixes the filename.
+Casavi portals don't offer a bulk download option. This tool automates it by logging in with Playwright (headless Chromium), expanding every folder, and downloading each PDF — skipping files already downloaded in a previous run. Supports multiple tenants (separate Casavi portals).
 
-## Setup
+## Quick start
 
-You need some software installed and some personal information set up, before the script can act.
+### Option A — Docker (recommended)
 
-### Dependencies
+```bash
+cp config.yaml.example config.yaml
+# edit config.yaml with your credentials and tenant URLs
+docker build -t casavi-downloader .
+docker run --rm \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v $(pwd)/DownloadedFiles:/app/DownloadedFiles \
+  casavi-downloader
+```
 
-- Make sure you have python installed
-- Make sure you have a version of ChromeDriver downloaded and unpacked
+### Option B — Local Python
 
-### Steps
+```bash
+cp config.yaml.example config.yaml
+# edit config.yaml with your credentials and tenant URLs
+python run.py
+```
 
-- Copy credentials-example.py to credentials.py
-- Insert the url of the login page
-- Login with the browser and find out the basedir of your documents. Add this url to documents_url.
-- Insert your username and password
-- Change chrome_driver_path to the binary of the chrome driver
-- Optionally change the target directory of downloaded pdfs
+`run.py` creates a virtualenv, installs dependencies, and runs the downloader.
 
-### Run
+## Configuration
 
-- Open a commandline and navigate into this directory
-- verify that python is installed `python3 --version`
-- if that worked flawless, you can run the application by calling `python run.py`
+Configuration is resolved in order — later sources override earlier ones:
+
+| Priority | Source |
+|----------|--------|
+| 1 (lowest) | `config.yaml` |
+| 2 | Environment variables |
+| 3 (highest) | CLI arguments |
+
+### config.yaml
+
+```yaml
+username: your@email.com
+password: yourpassword
+
+download_dir: ./DownloadedFiles  # optional, this is the default
+
+tenants:
+  - name: my-property            # becomes the subfolder name
+    url: https://portal.example.de/app/c/123456/info/documents
+  - name: second-property
+    url: https://other.mycasavi.com/app/c/789012/info/documents
+```
+
+See `config.yaml.example` for a full template.
+
+### Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `CASAVI_USERNAME` | Login email |
+| `CASAVI_PASSWORD` | Login password |
+| `CASAVI_DOWNLOAD_DIR` | Output directory |
+| `CASAVI_CONFIG` | Path to an alternate config file |
+| `CASAVI_TENANTS` | JSON array of `{"name","url"}` objects — overrides tenants in config file |
+
+### CLI arguments
+
+```
+--config FILE        Path to config.yaml (default: config.yaml)
+--username EMAIL
+--password PASS
+--download-dir DIR
+--tenant NAME        Only process this tenant (repeatable)
+--video              Record debug videos to ./debug-videos/
+```
+
+## Output
+
+Downloaded PDFs are saved to:
+
+```
+DownloadedFiles/
+  files/
+    <tenant-name>/
+      <doc-id>_<filename>.pdf
+  downloaded.yaml    ← tracks already-downloaded IDs
+```
+
+`downloaded.yaml` lets you move PDFs elsewhere (e.g. Paperless-ngx) without them being re-downloaded on the next run.
+
+## Docker examples
+
+```bash
+# single tenant
+docker run --rm \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v $(pwd)/DownloadedFiles:/app/DownloadedFiles \
+  casavi-downloader --tenant my-property
+
+# credentials via env vars, no config file
+docker run --rm \
+  -e CASAVI_USERNAME=your@email.com \
+  -e CASAVI_PASSWORD=secret \
+  -e CASAVI_TENANTS='[{"name":"my-property","url":"https://..."}]' \
+  -v $(pwd)/DownloadedFiles:/app/DownloadedFiles \
+  casavi-downloader
+
+# debug: record video of the browser session
+docker run --rm \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v $(pwd)/DownloadedFiles:/app/DownloadedFiles \
+  -v $(pwd)/debug-videos:/app/debug-videos \
+  casavi-downloader --video
+```

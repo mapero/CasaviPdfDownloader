@@ -1,6 +1,10 @@
 myenv/
+.git/
+.planning/
+.claude/
+__pycache__/
 credentials.py
 config.yaml
-__pycache__/
 DownloadedFiles/
 debug-videos/
+*.pyc

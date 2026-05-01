@@ -1,0 +1,27 @@
+# Casavi PDF Downloader — configuration example
+# Copy this file to config.yaml and fill in your values.
+# config.yaml is gitignored so credentials stay local.
+#
+# All values can also be set via environment variables or CLI flags
+# (env vars and CLI args override this file):
+#
+#   CASAVI_USERNAME      --username
+#   CASAVI_PASSWORD      --password
+#   CASAVI_DOWNLOAD_DIR  --download-dir
+#   CASAVI_CONFIG        (path to an alternate config file)
+#   CASAVI_TENANTS       (JSON array of {name, url} objects — overrides tenants below)
+
+# Credentials shared across all tenants
+username: your@email.com
+password: yourpassword
+
+# Root directory for downloaded PDFs
+# Files are stored as: <download_dir>/files/<tenant_name>/<doc_id>_<filename>.pdf
+download_dir: ./DownloadedFiles
+
+# One entry per Casavi portal
+tenants:
+  - name: my-property        # becomes the subfolder name under download_dir/files/
+    url: https://portal.example.de/app/c/123456/info/documents
+  - name: second-property
+    url: https://other.mycasavi.com/app/c/789012/info/documents
