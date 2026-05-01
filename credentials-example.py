@@ -1,19 +1,25 @@
 # Howto
-# - rename this file to credentials.py
+# - copy this file to credentials.py
 # - add your username and password
-# - add the path to your ChromeDriver
-# - run the script with `run.py`
+# - add one entry per Casavi tenant to the tenants list
+# - run: myenv/bin/python download.py
 
-login_url = 'https://my.casavi.com/app/login'
-documents_url = 'https://my.casavi.com/app/c/213519/info/documents'
+# Credentials (shared across all tenants)
+username = 'your@email.com'
+password = 'yourpassword'
 
-# add your username and password here
-username = 'xxx'
-password = 'yyy'
+# Tenants — add one dict per Casavi portal you want to download from.
+# 'name' becomes the subfolder under download_dir.
+# The login URL is derived automatically from the portal domain.
+tenants = [
+    {
+        'name': 'my-property',
+        'url': 'https://portal.example.de/app/c/123456/info/documents',
+    },
+    {
+        'name': 'second-property',
+        'url': 'https://other.mycasavi.com/app/c/789012/info/documents',
+    },
+]
 
-# download the ChromeDriver from:
-# https://developer.chrome.com/docs/chromedriver/downloads
-# add the path to your ChromeDriver here
-chrome_driver_path = '${HOME}/Downloads/chromedriver-mac-arm64/chromedriver'
-
-download_dir = './DownloadedFiles'  # Directory to save downloaded PDFs
+download_dir = './DownloadedFiles'  # PDFs saved to <download_dir>/<tenant_name>/
