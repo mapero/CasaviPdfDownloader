@@ -11,6 +11,11 @@ Key improvements over the Selenium version:
 import os
 import re
 import sys
+from urllib.parse import urlparse
+
+# credentials.py lives in the project root, three levels above this spike
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import credentials
 
@@ -21,9 +26,11 @@ def extract_community_id(url: str) -> str:
     return match.group(1)
 
 def download_pdfs():
-    login_url = credentials.login_url
     documents_url = credentials.documents_url
     download_dir = credentials.download_dir
+    # Derive login URL from the same origin as documents_url — each Casavi tenant has its own /app/login
+    origin = f"{urlparse(documents_url).scheme}://{urlparse(documents_url).netloc}"
+    login_url = f"{origin}/app/login"
 
     community_id = extract_community_id(documents_url)
     folder_selector = "div.clickable.box-subhead--title.dashboard-tile-company-background"
@@ -36,31 +43,31 @@ def download_pdfs():
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
-        context = browser.new_context()
+        context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 
-        # Login
         print(f"Navigating to login page: {login_url}")
         page.goto(login_url, timeout=20000)
         page.wait_for_selector('input[name="username"]', timeout=10000)
-
         page.fill('input[name="username"]', credentials.username)
         page.fill('input[name="password"]', credentials.password)
         page.click('button[data-testid="login-in"]')
 
-        # Wait for login redirect (any URL change away from login)
+        # Wait for SSO redirect back to documents (not login)
         try:
-            page.wait_for_url(lambda url: "login" not in url, timeout=10000)
+            page.wait_for_url(lambda url: "login" not in url, timeout=15000)
         except PlaywrightTimeoutError:
             print("ERROR: Login did not redirect. Check credentials.", file=sys.stderr)
             browser.close()
             return
 
-        print("Login successful.")
+        print(f"Login successful. Landed at: {page.url}")
 
-        # Navigate to documents page
+        # Navigate to documents page after login
         print(f"Navigating to documents: {documents_url}")
-        page.goto(documents_url, timeout=20000)
+        page.goto(documents_url, timeout=20000, wait_until="domcontentloaded")
+        page.wait_for_load_state("networkidle", timeout=10000)
+
         page.wait_for_selector(folder_selector, timeout=15000)
 
         # Click each folder to expand PDF links
@@ -87,6 +94,8 @@ def download_pdfs():
 
         # Download each PDF using the authenticated browser context
         for pdf_url, text in unique_links:
+            if pdf_url.startswith("/"):
+                pdf_url = origin + pdf_url
             filename = text.replace(" ", "_") if text else pdf_url.split("/")[-1]
             if not filename.endswith(".pdf"):
                 filename += ".pdf"

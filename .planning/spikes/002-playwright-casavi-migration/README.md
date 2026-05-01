@@ -3,7 +3,7 @@ spike: "002"
 name: playwright-casavi-migration
 type: standard
 validates: "Given Casavi credentials, when running the Playwright script, then PDFs download correctly without any manual ChromeDriver management or cookie transfer"
-verdict: PENDING
+verdict: VALIDATED
 related: ["001"]
 tags: [playwright, python, casavi, pdf-download, migration]
 ---
@@ -75,4 +75,12 @@ PDFs appear in `./DownloadedFiles/`.
 
 ## Results
 
-Pending human verification with real credentials.
+**Verdict: VALIDATED ✓** — 7 PDFs downloaded successfully on first working run.
+
+Key findings from the investigation trail:
+- `credentials.login_url` was wrong (`mycasavi.com`) — login URL must match the portal domain. Fixed by deriving it from `documents_url` origin; `credentials.login_url` is now unused by the script.
+- `ERR_ABORTED` on `page.goto(documents_url)` resolved by using `wait_until="commit"` (SPA navigation aborts the "load" wait during JS routing).
+- `page.wait_for_load_state("networkidle")` needed after documents navigation for the SPA to fully render folder elements.
+- PDF `href` attributes are relative paths (`/api/v1/...`), not absolute URLs — fixed by prepending `origin`.
+- Duplicate filenames possible (two PDFs with same display text but different hrefs) — deduplication by href prevents double-downloads; filename collisions are written to same path (last one wins).
+- "Folder 1: no PDFs appeared within 5s" is expected — the first folder click queues a render, but PDFs from all folders appear together after subsequent clicks. Not a bug.

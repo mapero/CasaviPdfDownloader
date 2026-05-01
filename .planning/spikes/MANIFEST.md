@@ -16,4 +16,4 @@ Replace the Selenium + ChromeDriver based `download.py` with a more stable Playw
 | # | Name | Type | Validates | Verdict | Tags |
 |---|------|------|-----------|---------|------|
 | 001 | playwright-install-verify | standard | Given Linux machine, when installing playwright + chromium, then headless browser runs | VALIDATED ✓ | playwright, python, headless, chromium, linux |
-| 002 | playwright-casavi-migration | standard | Given Casavi credentials, when running Playwright script, then PDFs download without ChromeDriver or cookie transfer | PENDING | playwright, python, casavi, pdf-download, migration |
+| 002 | playwright-casavi-migration | standard | Given Casavi credentials, when running Playwright script, then PDFs download without ChromeDriver or cookie transfer | VALIDATED ✓ | playwright, python, casavi, pdf-download, migration |
