@@ -16,7 +16,7 @@ cp config.yaml.example config.yaml
 docker build -t casavi-downloader .
 docker run --rm \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
-  -v $(pwd)/DownloadedFiles:/app/DownloadedFiles \
+  -v $(pwd)/data:/app/DownloadedFiles \
   casavi-downloader
 ```
 
@@ -46,10 +46,11 @@ Configuration is resolved in order — later sources override earlier ones:
 username: your@email.com
 password: yourpassword
 
-download_dir: ./DownloadedFiles  # optional, this is the default
+data_dir: ./DownloadedFiles      # state file lives here (default: ./DownloadedFiles)
+# download_dir: /mnt/nas/casavi  # PDF files (default: <data_dir>/files)
 
 tenants:
-  - name: my-property            # becomes the subfolder name
+  - name: my-property            # becomes the subfolder name under download_dir
     url: https://portal.example.de/app/c/123456/info/documents
   - name: second-property
     url: https://other.mycasavi.com/app/c/789012/info/documents
@@ -63,7 +64,8 @@ See `config.yaml.example` for a full template.
 |----------|-------------|
 | `CASAVI_USERNAME` | Login email |
 | `CASAVI_PASSWORD` | Login password |
-| `CASAVI_DOWNLOAD_DIR` | Output directory |
+| `CASAVI_DATA_DIR` | Directory for `downloaded.yaml` state file |
+| `CASAVI_DOWNLOAD_DIR` | Directory for downloaded PDFs (default: `<data_dir>/files`) |
 | `CASAVI_CONFIG` | Path to an alternate config file |
 | `CASAVI_TENANTS` | JSON array of `{"name","url"}` objects — overrides tenants in config file |
 
@@ -73,46 +75,55 @@ See `config.yaml.example` for a full template.
 --config FILE        Path to config.yaml (default: config.yaml)
 --username EMAIL
 --password PASS
---download-dir DIR
+--data-dir DIR       Directory for downloaded.yaml state file
+--download-dir DIR   Directory for downloaded PDFs (default: <data-dir>/files)
 --tenant NAME        Only process this tenant (repeatable)
 --video              Record debug videos to ./debug-videos/
 ```
 
 ## Output
 
-Downloaded PDFs are saved to:
-
 ```
-DownloadedFiles/
-  files/
-    <tenant-name>/
-      <doc-id>_<filename>.pdf
-  downloaded.yaml    ← tracks already-downloaded IDs
+<data_dir>/
+  downloaded.yaml          ← tracks already-downloaded doc IDs
+
+<download_dir>/            ← default: <data_dir>/files
+  <tenant-name>/
+    <doc-id>_<filename>.pdf
 ```
 
-`downloaded.yaml` lets you move PDFs elsewhere (e.g. Paperless-ngx) without them being re-downloaded on the next run.
+`downloaded.yaml` lets you move PDFs elsewhere (e.g. Paperless-ngx) without them being re-downloaded on the next run. Set `download_dir` independently when you want PDFs on a separate mount.
 
 ## Docker examples
 
 ```bash
-# single tenant
+# default layout — state and PDFs under the same volume
 docker run --rm \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
-  -v $(pwd)/DownloadedFiles:/app/DownloadedFiles \
-  casavi-downloader --tenant my-property
+  -v $(pwd)/data:/app/DownloadedFiles \
+  casavi-downloader
 
-# credentials via env vars, no config file
+# separate volumes for state and PDFs
+docker run --rm \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -v $(pwd)/data:/data \
+  -v /mnt/nas/casavi:/downloads \
+  -e CASAVI_DATA_DIR=/data \
+  -e CASAVI_DOWNLOAD_DIR=/downloads \
+  casavi-downloader
+
+# single tenant, credentials via env vars
 docker run --rm \
   -e CASAVI_USERNAME=your@email.com \
   -e CASAVI_PASSWORD=secret \
   -e CASAVI_TENANTS='[{"name":"my-property","url":"https://..."}]' \
-  -v $(pwd)/DownloadedFiles:/app/DownloadedFiles \
-  casavi-downloader
+  -v $(pwd)/data:/app/DownloadedFiles \
+  casavi-downloader --tenant my-property
 
 # debug: record video of the browser session
 docker run --rm \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
-  -v $(pwd)/DownloadedFiles:/app/DownloadedFiles \
+  -v $(pwd)/data:/app/DownloadedFiles \
   -v $(pwd)/debug-videos:/app/debug-videos \
   casavi-downloader --video
 ```
