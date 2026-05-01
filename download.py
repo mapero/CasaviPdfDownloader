@@ -4,9 +4,9 @@ Casavi PDF Downloader — Playwright-based, multi-tenant.
 Configuration is loaded by config.py (12-factor style):
   config.yaml  >  env vars  >  CLI args
 
-Downloads are saved to: <download_dir>/files/<tenant_name>/<doc_id>_<filename>.pdf
-Already-downloaded doc IDs are tracked in downloaded.yaml so files can be moved
-(e.g. to Paperless) without being re-downloaded.
+State file:  <data_dir>/downloaded.yaml
+Downloads:   <download_dir>/<tenant_name>/<doc_id>_<filename>.pdf
+             (download_dir defaults to <data_dir>/files)
 """
 
 import os
@@ -20,8 +20,8 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from config import load_config
 
 
-def state_file(download_dir: str) -> str:
-    return os.path.join(download_dir, "downloaded.yaml")
+def state_file(data_dir: str) -> str:
+    return os.path.join(data_dir, "downloaded.yaml")
 
 
 def extract_community_id(url: str) -> str:
@@ -31,9 +31,9 @@ def extract_community_id(url: str) -> str:
     return match.group(1)
 
 
-def load_state(download_dir: str) -> dict:
+def load_state(data_dir: str) -> dict:
     """Load downloaded doc IDs from YAML. Returns {tenant: set(doc_ids)}."""
-    path = state_file(download_dir)
+    path = state_file(data_dir)
     if not os.path.exists(path):
         return {}
     with open(path) as f:
@@ -41,21 +41,21 @@ def load_state(download_dir: str) -> dict:
     return {tenant: set(ids) for tenant, ids in data.items()}
 
 
-def save_state(state: dict, download_dir: str):
+def save_state(state: dict, data_dir: str):
     """Persist state to YAML. Converts sets to sorted lists for readability."""
-    with open(state_file(download_dir), "w") as f:
+    with open(state_file(data_dir), "w") as f:
         yaml.dump({tenant: sorted(ids) for tenant, ids in state.items()},
                   f, default_flow_style=False, allow_unicode=True)
 
 
 def download_tenant(page, context, name: str, documents_url: str,
                     username: str, password: str,
-                    download_dir: str, state: dict):
+                    data_dir: str, download_dir: str, state: dict):
     origin = f"{urlparse(documents_url).scheme}://{urlparse(documents_url).netloc}"
     community_id = extract_community_id(documents_url)
     folder_selector = "div.clickable.box-subhead--title.dashboard-tile-company-background"
     pdf_selector = f'a[href*="/api/v1/communities/{community_id}/documents/"]'
-    tenant_dir = os.path.join(download_dir, "files", name)
+    tenant_dir = os.path.join(download_dir, name)
     os.makedirs(tenant_dir, exist_ok=True)
     downloaded = state.setdefault(name, set())
 
@@ -137,7 +137,7 @@ def download_tenant(page, context, name: str, documents_url: str,
             with open(dest, "wb") as f:
                 f.write(response.body())
             downloaded.add(doc_id)
-            save_state(state, download_dir)
+            save_state(state, data_dir)
             print(f"  [{name}] Downloaded: {filename}")
         else:
             print(f"  [{name}] FAILED ({response.status}): {pdf_url}", file=sys.stderr)
@@ -147,13 +147,15 @@ def main():
     cfg = load_config()
 
     tenants = [(t['name'], t['url']) for t in cfg['tenants']]
+    data_dir = cfg['data_dir']
     download_dir = cfg['download_dir']
     username = cfg['username']
     password = cfg['password']
     record_video = cfg['video']
 
+    os.makedirs(data_dir, exist_ok=True)
     os.makedirs(download_dir, exist_ok=True)
-    state = load_state(download_dir)
+    state = load_state(data_dir)
 
     print(f"Tenants: {[name for name, _ in tenants]}")
 
@@ -175,7 +177,7 @@ def main():
             page = context.new_page()
             try:
                 download_tenant(page, context, name, documents_url,
-                                username, password, download_dir, state)
+                                username, password, data_dir, download_dir, state)
             finally:
                 context.close()
                 if record_video and page.video:

@@ -7,6 +7,7 @@
 #
 #   CASAVI_USERNAME      --username
 #   CASAVI_PASSWORD      --password
+#   CASAVI_DATA_DIR      --data-dir
 #   CASAVI_DOWNLOAD_DIR  --download-dir
 #   CASAVI_CONFIG        (path to an alternate config file)
 #   CASAVI_TENANTS       (JSON array of {name, url} objects — overrides tenants below)
@@ -15,9 +16,12 @@
 username: your@email.com
 password: yourpassword
 
-# Root directory for downloaded PDFs
-# Files are stored as: <download_dir>/files/<tenant_name>/<doc_id>_<filename>.pdf
-download_dir: ./DownloadedFiles
+# Directory for the state file (downloaded.yaml)
+data_dir: ./DownloadedFiles
+
+# Directory for downloaded PDFs — defaults to <data_dir>/files if not set.
+# Override to store PDFs elsewhere (e.g. a separate NAS mount).
+# download_dir: /mnt/nas/casavi
 
 # One entry per Casavi portal
 tenants:

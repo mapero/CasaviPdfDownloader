@@ -5,8 +5,16 @@ Precedence (lowest → highest):
   1. Built-in defaults
   2. config.yaml  (or file pointed to by --config / CASAVI_CONFIG)
   3. credentials.py  (legacy fallback — prints deprecation warning)
-  4. Environment variables  (CASAVI_USERNAME, CASAVI_PASSWORD, CASAVI_DOWNLOAD_DIR, CASAVI_TENANTS)
-  5. CLI arguments  (--username, --password, --download-dir, --tenant, --video)
+  4. Environment variables  (CASAVI_USERNAME, CASAVI_PASSWORD, CASAVI_DATA_DIR,
+                             CASAVI_DOWNLOAD_DIR, CASAVI_TENANTS)
+  5. CLI arguments  (--username, --password, --data-dir, --download-dir, --tenant, --video)
+
+Directory layout:
+  data_dir/
+    downloaded.yaml        ← download state (which doc IDs have been fetched)
+  download_dir/            ← default: <data_dir>/files
+    <tenant-name>/
+      <doc-id>_<name>.pdf
 """
 
 import argparse
@@ -18,7 +26,9 @@ from urllib.parse import urlparse
 import yaml
 
 DEFAULTS = {
-    'download_dir': './DownloadedFiles',
+    'data_dir': './DownloadedFiles',
+    # download_dir is not set here — it defaults to <data_dir>/files after all
+    # sources are merged, so an explicit data_dir still moves both together.
     'video': False,
     'tenants': [],
 }
@@ -30,7 +40,10 @@ def _parse_args(argv=None):
                    help='Path to config.yaml (default: config.yaml)')
     p.add_argument('--username', metavar='EMAIL')
     p.add_argument('--password', metavar='PASS')
-    p.add_argument('--download-dir', dest='download_dir', metavar='DIR')
+    p.add_argument('--data-dir', dest='data_dir', metavar='DIR',
+                   help='Directory for downloaded.yaml state file (default: ./DownloadedFiles)')
+    p.add_argument('--download-dir', dest='download_dir', metavar='DIR',
+                   help='Directory for downloaded PDFs (default: <data-dir>/files)')
     p.add_argument('--tenant', dest='filter_tenants', action='append', metavar='NAME',
                    help='Only process this tenant name (repeatable)')
     p.add_argument('--video', action='store_true',
@@ -64,7 +77,7 @@ def _load_legacy_credentials():
     if hasattr(creds, 'password'):
         cfg['password'] = creds.password
     if hasattr(creds, 'download_dir'):
-        cfg['download_dir'] = creds.download_dir
+        cfg['data_dir'] = creds.download_dir
     if hasattr(creds, 'tenants'):
         cfg['tenants'] = creds.tenants
     elif hasattr(creds, 'documents_url'):
@@ -94,6 +107,7 @@ def load_config(argv=None):
     for env_var, key in [
         ('CASAVI_USERNAME', 'username'),
         ('CASAVI_PASSWORD', 'password'),
+        ('CASAVI_DATA_DIR', 'data_dir'),
         ('CASAVI_DOWNLOAD_DIR', 'download_dir'),
     ]:
         val = os.environ.get(env_var)
@@ -113,6 +127,8 @@ def load_config(argv=None):
         cfg['username'] = args.username
     if args.password:
         cfg['password'] = args.password
+    if args.data_dir:
+        cfg['data_dir'] = args.data_dir
     if args.download_dir:
         cfg['download_dir'] = args.download_dir
     if args.video:
@@ -126,6 +142,10 @@ def load_config(argv=None):
             print(f"Configured tenants: {', '.join(sorted(known)) or '(none)'}", file=sys.stderr)
             sys.exit(1)
         cfg['tenants'] = [t for t in cfg['tenants'] if t['name'] in args.filter_tenants]
+
+    # --- resolve download_dir default ---
+    if not cfg.get('download_dir'):
+        cfg['download_dir'] = os.path.join(cfg['data_dir'], 'files')
 
     # --- validation ---
     missing = [k for k in ('username', 'password') if not cfg.get(k)]
